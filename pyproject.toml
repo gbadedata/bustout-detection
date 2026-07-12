@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bustout-detection"
+version = "0.1.0"
+description = "Bust-out and first-party fraud detection: leakage-safe trajectory features over an account-month panel, an early-warning model, and a cost-ranked freeze queue."
+requires-python = ">=3.10"
+dependencies = ["pandas>=2.0", "numpy>=1.24", "scikit-learn>=1.3"]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0", "ruff>=0.4", "duckdb>=0.10", "matplotlib>=3.7"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
