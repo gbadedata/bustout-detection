@@ -9,7 +9,7 @@ whole point of the project.
 
 import numpy as np
 
-from bustout import features, panel_data
+from bustout import features, metrics, model, panel_data, scoring
 
 
 def test_features_use_no_future_info():
@@ -58,3 +58,48 @@ def test_trajectory_separates_bustout_from_distress():
     assert ramp["cash_advance_share"].mean() > distress["cash_advance_share"].mean()
     assert ramp["limit_growth_ratio"].mean() > distress["limit_growth_ratio"].mean()
     assert distress["min_pay_streak"].mean() > ramp["min_pay_streak"].mean()
+
+
+def _fit_and_score(seed=8, n=900):
+    panel = panel_data.add_labels(panel_data.mock_panel(n_accounts=n, seed=seed), horizon=3)
+    feat, cols = features.build_features(panel)
+    train, test, _ = model.time_split(feat, frac=0.55)
+    train = train[model.scoreable(train)]
+    test = test[model.scoreable(test)].copy()
+    clf = model.train_model(train, cols, seed=0)
+    prob = model.score_model(clf, test, cols)
+    test["bustout_prob"] = prob.to_numpy()
+    test["exposure_at_risk"] = scoring.exposure_at_risk(test).to_numpy()
+    test["expected_loss"] = (test["bustout_prob"] * test["exposure_at_risk"]).to_numpy()
+    return test, prob
+
+
+def test_scoreable_excludes_post_bust_only():
+    panel = panel_data.add_labels(panel_data.mock_panel(n_accounts=300, seed=5))
+    m = model.scoreable(panel)
+    assert (panel.loc[~m, "months_to_bust"] < 0).all()
+    assert m[panel["account_type"] != "bustout"].all()
+
+
+def test_time_split_is_chronological():
+    panel = panel_data.add_labels(panel_data.mock_panel(n_accounts=200, seed=3))
+    feat, _ = features.build_features(panel)
+    train, test, _ = model.time_split(feat, frac=0.55)
+    assert train["statement_date"].max() < test["statement_date"].min()
+
+
+def test_model_beats_point_in_time_baselines():
+    test, _ = _fit_and_score()
+    y = test["will_bustout"]
+    assert metrics.pr_auc(y, test["bustout_prob"]) > 0.7
+    assert metrics.pr_auc(y, test["bustout_prob"]) > metrics.pr_auc(y, test["utilization"]) + 0.2
+
+
+def test_queue_leaves_distress_alone_and_ranks_by_exposure():
+    from bustout import scoring as sc
+    test, prob = _fit_and_score()
+    sep = metrics.separation(test, budget=0.01)
+    assert sep["model"]["distress_share"] <= sep["by_utilisation"]["distress_share"]
+    q = sc.build_queue(test, prob, top=10)
+    assert q["expected_loss"].is_monotonic_decreasing
+    assert (q["reasons"].str.len() > 0).all()
