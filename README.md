@@ -149,7 +149,7 @@ The model ranks the rare label far above the point-in-time baselines (average pr
 | Base rate | 0.007 |
 | Ranked by delinquency | 0.047 |
 | Ranked by utilisation | 0.476 |
-| Trajectory model | 0.979 |
+| Trajectory model | 0.96 |
 
 The number that matters more is who ends up in the queue. Working the top 1% of scored
 account-months:
@@ -174,23 +174,47 @@ is still undrawn.
 ![Bust-out exposure caught against review budget, model queue versus a utilisation-ranked queue](docs/img/exposure_budget.png)
 
 Because the queue ranks by exposure at risk, the undrawn line a bust-out would take, working
-just the top 1% of account-months catches effectively all of the bust-out exposure. A
-utilisation-ranked queue of the same size catches far less, because it spends the budget on
-high-utilisation accounts that are not bust-outs.
+just the top 1% of account-months catches 83% of the bust-out exposure, and the top 5%
+catches 96%, far more than a utilisation-ranked queue of the same size, which spends the
+budget on high-utilisation accounts that are not bust-outs.
 
-These numbers reflect a synthetic panel where the ramp, once it starts, is well defined.
-Real bust-out is adversarial and noisier, and the model would need recalibrating on real
-outcomes; the result that carries over is that trajectory features separate bust-out from
-distress where levels cannot.
+These numbers are from the reference run on the mock and shift slightly with library
+versions; the separation of bust-out from distress is stable. They also reflect a synthetic
+panel where the ramp, once it starts, is well defined. Real bust-out is adversarial and
+noisier, and the model would need recalibrating on real outcomes; the result that carries
+over is that trajectory features separate bust-out from distress where levels cannot.
+
+## Investigation queries
+
+Behind every flag is an analyst asking what the account did. The queries in
+`sql/investigation.sql` run over the panel with DuckDB and answer that from the trajectory,
+not the label. Run them with `python scripts/run_investigation.py`.
+
+- **rising_utilisation** finds accounts whose utilisation jumped sharply over the last three
+  months.
+- **maxed_after_limit_increase** finds accounts that ran to a near-full line within a few
+  months of a limit increase, the bust-out move of grabbing more room and draining it.
+- **full_pay_then_stopped** finds accounts that paid in full and then abruptly stopped while
+  carrying a high balance.
+- **cash_draw_spike** ranks statements by the size of a cash draw on the line.
+- **fast_limit_growth** ranks accounts by how fast their credit line grew.
+- **undrawn_exposure_now** ranks accounts still current but climbing fast by the undrawn
+  line a freeze would protect, the same exposure the queue is built on.
+
+For example, maxed_after_limit_increase surfaces accounts that hit a near-full line two to
+three months after their limit was raised:
+
+```
+account_id  increase_month  maxed_month  months_after_increase
+    A00327               4            6                      2
+    A00016               4            7                      3
+```
 
 ## Roadmap
 
-The panel, the leakage-safe features, the model, the freeze queue, and the evaluation above
-are all in place. Still to come:
+The panel, the leakage-safe features, the model, the freeze queue, the evaluation above, and
+the investigation queries are all in place. Still to come:
 
-- **Investigation SQL.** Account-level queries over the panel for the trajectory behind a
-  flag: an account's utilisation and payment history, the limit increases before a ramp, the
-  accounts that maxed out soon after a limit rise.
 - **Score calibration.** The model ranks well; before its output is read as a probability
   rather than a rank, it should be calibrated, and that calibration checked over time.
 
@@ -213,6 +237,7 @@ pip install -e ".[dev]"
 make test            # includes the no-lookahead guard
 python run_demo.py   # the panel, the label, and the trajectory separation
 python run_model.py  # train, score, and the full evaluation above
+python scripts/run_investigation.py   # the analyst queries over the panel
 ```
 
 With no feed present, everything runs on the mock. To score your own book, drop a CSV at
@@ -227,10 +252,14 @@ With no feed present, everything runs on the mock. To score your own book, drop 
 │   ├── features.py      # leakage-safe trajectory features
 │   ├── model.py         # time split, scoreable rows, gradient-boosted model
 │   ├── scoring.py       # monthly action + exposure-ranked freeze queue + reasons
-│   └── metrics.py       # PR-AUC, lead time, exposure at budget, bust-vs-distress separation
-├── tests/               # leakage guard, label, generator, model and queue checks
+│   ├── metrics.py       # PR-AUC, lead time, exposure at budget, bust-vs-distress separation
+│   └── investigation.py # runs the analyst SQL over a panel
+├── sql/
+│   └── investigation.sql  # six DuckDB investigation queries
+├── tests/               # leakage guard, label, generator, model, queue, SQL checks
 ├── scripts/
-│   └── make_figures.py  # the README figures
+│   ├── make_figures.py       # the README figures
+│   └── run_investigation.py  # print the investigation results
 ├── run_demo.py          # panel report and the trajectory separation
 ├── run_model.py         # train, score, and evaluate
 ├── data/README.md       # input format

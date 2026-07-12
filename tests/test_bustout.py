@@ -9,7 +9,7 @@ whole point of the project.
 
 import numpy as np
 
-from bustout import features, metrics, model, panel_data, scoring
+from bustout import features, investigation, metrics, model, panel_data, scoring
 
 
 def test_features_use_no_future_info():
@@ -103,3 +103,14 @@ def test_queue_leaves_distress_alone_and_ranks_by_exposure():
     q = sc.build_queue(test, prob, top=10)
     assert q["expected_loss"].is_monotonic_decreasing
     assert (q["reasons"].str.len() > 0).all()
+
+
+def test_investigation_queries_run(tmp_path):
+    csv = panel_data.write_mock_panel(tmp_path, n_accounts=400, seed=5)
+    res = investigation.run(csv)
+    assert set(res) == {"rising_utilisation", "maxed_after_limit_increase",
+                        "full_pay_then_stopped", "cash_draw_spike", "fast_limit_growth",
+                        "undrawn_exposure_now"}
+    # queries mapping to injected bust-out behaviour should surface something
+    assert len(res["cash_draw_spike"][1]) > 0
+    assert len(res["fast_limit_growth"][1]) > 0
